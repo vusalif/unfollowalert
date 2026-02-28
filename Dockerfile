@@ -26,9 +26,9 @@ COPY --chown=pptruser:pptruser cookies.json ./
 RUN mkdir -p /app/data
 
 # Environment variables (overridden by hosting platform)
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable \
-    HEADLESS=true \
+# Note: Chrome is bundled in the puppeteer base image at
+# /home/pptruser/.cache/puppeteer/chrome/ — Puppeteer auto-detects it.
+ENV HEADLESS=true \
     PORT=3000
 
 # Expose the web server port
