@@ -167,17 +167,12 @@ async function scrapeFollowers(instagramUsername) {
             "--disable-gpu",
             "--disable-dev-shm-usage",
             "--window-size=1280,900",
-            // ── Memory / CPU savers ──
-            "--single-process",              // fewer processes = less RAM
-            "--disable-extensions",          // no extensions overhead
-            "--disable-background-networking", // stop background fetches
+            // ── Safe memory savers ──
+            "--disable-extensions",
             "--disable-default-apps",
             "--disable-translate",
             "--disable-sync",
             "--no-first-run",
-            "--disable-background-timer-throttling",
-            "--blink-settings=imagesEnabled=false", // skip loading images
-            "--js-flags=--max-old-space-size=256",   // cap V8 heap to 256MB
         ],
         defaultViewport: { width: 1280, height: 900 },
     });
