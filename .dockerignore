@@ -1,0 +1,7 @@
+node_modules
+.env
+followers.json
+.git
+.gitignore
+README.md
+*.md
