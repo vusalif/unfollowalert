@@ -62,60 +62,76 @@ async function processUser(user, bot) {
 
     log(`🔍 Checking @${instagram_username} for user ${telegram_id}…`);
 
-    try {
-        const freshFollowers = await scrapeFollowers(instagram_username);
+    const MAX_RETRIES = 2;
 
-        if (freshFollowers.length === 0) {
-            log(`⚠️  No followers scraped for @${instagram_username}. Skipping.`);
-            await bot.sendMessage(
-                telegram_id,
-                "⚠️ <b>Check Failed</b>\n\nCouldn't scrape your follower list right now. " +
-                "This might be a temporary issue. We'll try again on the next scheduled check.",
-                { parse_mode: "HTML" }
-            );
-            return;
-        }
-
-        const isFirst = db.isFirstCheck(id);
-
-        if (isFirst) {
-            // First-time baseline
-            const count = db.initializeFollowers(id, freshFollowers);
-            await bot.sendMessage(
-                telegram_id,
-                `🎉 <b>First Check Complete!</b>\n\n` +
-                `Saved <b>${count}</b> followers as your baseline.\n` +
-                `You'll be notified of any changes on the next check (every 12 hours).`,
-                { parse_mode: "HTML" }
-            );
-            log(`🎉 Baseline saved for @${instagram_username}: ${count} followers`);
-        } else {
-            // Compare with existing snapshot
-            const { unfollowers, newFollowers } = db.syncFollowers(id, freshFollowers);
-
-            log(
-                `📊 @${instagram_username}: ${unfollowers.length} unfollowed, ${newFollowers.length} new`
-            );
-
-            // Only send message if there are changes
-            if (unfollowers.length > 0 || newFollowers.length > 0) {
-                const report = buildReport(unfollowers, newFollowers, freshFollowers.length);
-                await bot.sendMessage(telegram_id, report, {
-                    parse_mode: "HTML",
-                    disable_web_page_preview: true,
-                });
-            }
-        }
-    } catch (err) {
-        log(`❌ Error processing @${instagram_username}: ${err.message}`);
+    for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
         try {
-            await bot.sendMessage(
-                telegram_id,
-                `⚠️ <b>Check Error</b>\n\n<code>${err.message}</code>\n\nWe'll retry on the next scheduled check.`,
-                { parse_mode: "HTML" }
-            );
-        } catch (sendErr) {
-            log(`❌ Couldn't notify user ${telegram_id}: ${sendErr.message}`);
+            const freshFollowers = await scrapeFollowers(instagram_username);
+
+            if (freshFollowers.length === 0) {
+                log(`⚠️  No followers scraped for @${instagram_username}. Skipping.`);
+                await bot.sendMessage(
+                    telegram_id,
+                    "⚠️ <b>Check Failed</b>\n\nCouldn't scrape your follower list right now. " +
+                    "This might be a temporary issue. We'll try again on the next scheduled check.",
+                    { parse_mode: "HTML" }
+                );
+                return;
+            }
+
+            const isFirst = db.isFirstCheck(id);
+
+            if (isFirst) {
+                // First-time baseline
+                const count = db.initializeFollowers(id, freshFollowers);
+                await bot.sendMessage(
+                    telegram_id,
+                    `🎉 <b>First Check Complete!</b>\n\n` +
+                    `Saved <b>${count}</b> followers as your baseline.\n` +
+                    `You'll be notified of any changes on the next check (every 12 hours).`,
+                    { parse_mode: "HTML" }
+                );
+                log(`🎉 Baseline saved for @${instagram_username}: ${count} followers`);
+            } else {
+                // Compare with existing snapshot
+                const { unfollowers, newFollowers } = db.syncFollowers(id, freshFollowers);
+
+                log(
+                    `📊 @${instagram_username}: ${unfollowers.length} unfollowed, ${newFollowers.length} new`
+                );
+
+                // Only send message if there are changes
+                if (unfollowers.length > 0 || newFollowers.length > 0) {
+                    const report = buildReport(unfollowers, newFollowers, freshFollowers.length);
+                    await bot.sendMessage(telegram_id, report, {
+                        parse_mode: "HTML",
+                        disable_web_page_preview: true,
+                    });
+                }
+            }
+
+            return; // Success — exit the retry loop
+
+        } catch (err) {
+            const isTimeout = err.message.includes("timed out") || err.message.includes("Timeout");
+
+            if (isTimeout && attempt <= MAX_RETRIES) {
+                log(`⏳ Attempt ${attempt} timed out for @${instagram_username}. Retrying in 30s…`);
+                await sleep(30_000); // Let memory free up before retrying
+                continue;
+            }
+
+            log(`❌ Error processing @${instagram_username}: ${err.message}`);
+            try {
+                await bot.sendMessage(
+                    telegram_id,
+                    `⚠️ <b>Check Error</b>\n\n<code>${err.message}</code>\n\nWe'll retry on the next scheduled check.`,
+                    { parse_mode: "HTML" }
+                );
+            } catch (sendErr) {
+                log(`❌ Couldn't notify user ${telegram_id}: ${sendErr.message}`);
+            }
+            return;
         }
     }
 }

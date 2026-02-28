@@ -159,6 +159,7 @@ async function scrapeFollowers(instagramUsername) {
     const browser = await puppeteer.launch({
         headless: "new",
         executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+        protocolTimeout: 300_000, // 5 min — prevents Runtime.callFunctionOn timeout
         args: [
             "--no-sandbox",
             "--disable-setuid-sandbox",
@@ -166,6 +167,17 @@ async function scrapeFollowers(instagramUsername) {
             "--disable-gpu",
             "--disable-dev-shm-usage",
             "--window-size=1280,900",
+            // ── Memory / CPU savers ──
+            "--single-process",              // fewer processes = less RAM
+            "--disable-extensions",          // no extensions overhead
+            "--disable-background-networking", // stop background fetches
+            "--disable-default-apps",
+            "--disable-translate",
+            "--disable-sync",
+            "--no-first-run",
+            "--disable-background-timer-throttling",
+            "--blink-settings=imagesEnabled=false", // skip loading images
+            "--js-flags=--max-old-space-size=256",   // cap V8 heap to 256MB
         ],
         defaultViewport: { width: 1280, height: 900 },
     });
@@ -174,6 +186,8 @@ async function scrapeFollowers(instagramUsername) {
 
     try {
         const page = await browser.newPage();
+        page.setDefaultTimeout(120_000);           // 2 min for selectors / evaluate
+        page.setDefaultNavigationTimeout(120_000); // 2 min for goto / navigation
 
         await page.setUserAgent(
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
