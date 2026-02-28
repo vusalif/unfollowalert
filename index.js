@@ -508,9 +508,11 @@ async function runCheck() {
   if (runNow) {
     log("⚡ --run-now flag detected. Running an immediate check…");
     await runCheck();
+    log("👋 Single run complete. Exiting.");
+    process.exit(0);
   }
 
-  // Schedule recurring checks
+  // Schedule recurring checks (only when running as a long-lived process)
   log(`⏰ Scheduling follower checks with cron: "${CONFIG.schedule}"`);
   log(`   Next runs will be every 12 hours.\n`);
 
@@ -519,9 +521,7 @@ async function runCheck() {
     await runCheck();
   });
 
-  if (!runNow) {
-    log("💡 Tip: Run with --run-now flag for an immediate check.");
-    log("   Example: npm run check");
-    log("   The bot is now waiting for the next scheduled run…\n");
-  }
+  log("💡 Tip: Run with --run-now flag for an immediate check.");
+  log("   Example: npm run check");
+  log("   The bot is now waiting for the next scheduled run…\n");
 })();
