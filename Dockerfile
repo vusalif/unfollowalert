@@ -14,17 +14,29 @@ COPY --chown=pptruser:pptruser package.json package-lock.json ./
 # Install production dependencies only
 RUN npm ci --omit=dev
 
-# Copy the rest of the application
+# Copy the application source
 COPY --chown=pptruser:pptruser index.js ./
+COPY --chown=pptruser:pptruser src/ ./src/
+COPY --chown=pptruser:pptruser public/ ./public/
 
-# Copy data files if they exist (cookies, followers snapshot)
-# These will typically be mounted as volumes in production
+# Copy cookies (shared Instagram session)
 COPY --chown=pptruser:pptruser cookies.json ./
 
-# Environment variables (these get overridden by .env or hosting platform)
+# Create data directory for SQLite database
+RUN mkdir -p /app/data
+
+# Environment variables (overridden by hosting platform)
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable \
-    HEADLESS=true
+    HEADLESS=true \
+    PORT=3000
 
-# The app runs as a long-lived process (node-cron scheduler)
-CMD ["node", "index.js", "--run-now"]
+# Expose the web server port
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:3000/health || exit 1
+
+# The app runs as a long-lived process
+CMD ["node", "index.js"]
