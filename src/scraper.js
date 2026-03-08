@@ -22,7 +22,7 @@ const SCROLL_CONFIG = {
     minDelay: 2000,
     maxDelay: 5000,
     scrollStep: 400,
-    maxStalledAttempts: 8,
+    maxStalledAttempts: 15,
 };
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
@@ -107,17 +107,18 @@ async function findScrollableContainer(page) {
 
 // ─── Follower Extraction ─────────────────────────────────────────────────────
 
-async function extractFollowerUsernames(page) {
-    return page.evaluate(() => {
-        const dialog = document.querySelector('div[role="dialog"]');
-        if (!dialog) return [];
+async function extractFollowerUsernames(page, scrollableHandle) {
+    return page.evaluate((scrollable) => {
+        const container = scrollable || document.querySelector('div[role="dialog"]');
+        if (!container) return [];
 
         const usernames = new Set();
 
-        const links = dialog.querySelectorAll("a");
+        const links = container.querySelectorAll("a");
         for (const link of links) {
             const href = link.getAttribute("href");
             if (!href) continue;
+
             const match = href.match(/^\/([a-zA-Z0-9._]{1,30})\/$/);
             if (
                 match &&
@@ -126,24 +127,31 @@ async function extractFollowerUsernames(page) {
                 !href.includes("/p/") &&
                 !href.includes("/reel/")
             ) {
-                if (match[1].length > 0) {
-                    usernames.add(match[1]);
+                const username = match[1];
+                if (["explore", "reels", "p", "direct", "stories"].includes(username)) continue;
+
+                const isBold = window.getComputedStyle(link).fontWeight === '600' ||
+                    link.querySelector('span[style*="font-weight: 600"]') ||
+                    link.innerText.trim() === username;
+
+                if (isBold) {
+                    const row = link.closest('div[role="button"]') || link.closest('li') || link.parentElement.parentElement;
+                    const rowText = row ? row.innerText : "";
+
+                    if (rowText.includes("Follow") &&
+                        !rowText.includes("Following") &&
+                        !rowText.includes("Remove") &&
+                        !rowText.includes("Follow back") && // 'Follow back' means they follow you!
+                        !rowText.includes("Follow Back")) {
+                        continue;
+                    }
+                    usernames.add(username);
                 }
             }
         }
 
-        const spans = dialog.querySelectorAll('span a[role="link"]');
-        for (const span of spans) {
-            const href = span.getAttribute("href");
-            if (!href) continue;
-            const match = href.match(/^\/([a-zA-Z0-9._]{1,30})\/$/);
-            if (match) {
-                usernames.add(match[1]);
-            }
-        }
-
         return Array.from(usernames);
-    });
+    }, scrollableHandle);
 }
 
 // ─── Main Scrape Function ────────────────────────────────────────────────────
@@ -216,9 +224,17 @@ async function scrapeFollowers(instagramUsername) {
         await page.click(followersLinkSelector);
         log("✅ Clicked the Followers link");
 
-        // Wait for dialog
+        // Wait for dialog and at least one follower item
         await page.waitForSelector('div[role="dialog"]', { timeout: 15000 });
         log("📋 Followers dialog opened");
+
+        // Wait for at least one potential follower link to appear
+        try {
+            await page.waitForSelector('div[role="dialog"] a', { timeout: 5000 });
+        } catch (_) {
+            log("⚠️ No links found in dialog yet. Continuing anyway.");
+        }
+
         await sleep(randomDelay(3000, 5000));
 
         // Find scrollable container
@@ -235,7 +251,7 @@ async function scrapeFollowers(instagramUsername) {
 
         while (stalledCount < SCROLL_CONFIG.maxStalledAttempts) {
             scrollIteration++;
-            const currentFollowers = await extractFollowerUsernames(page);
+            const currentFollowers = await extractFollowerUsernames(page, scrollableHandle);
             const mergedSet = new Set([...followers, ...currentFollowers]);
             followers = Array.from(mergedSet);
 
@@ -258,7 +274,7 @@ async function scrapeFollowers(instagramUsername) {
         }
 
         // Final extraction
-        const finalFollowers = await extractFollowerUsernames(page);
+        const finalFollowers = await extractFollowerUsernames(page, scrollableHandle);
         followers = Array.from(new Set([...followers, ...finalFollowers]));
 
         log(`✅ Scraped ${followers.length} followers for @${instagramUsername}`);
