@@ -248,40 +248,45 @@ async function scrapeFollowers(instagramUsername) {
         // Click followers link - using a more robust approach
         log(`🔍 Looking for followers link for @${instagramUsername}…`);
         const followersClicked = await page.evaluate((username) => {
+            const usernameLower = username.toLowerCase();
+            const allLinks = Array.from(document.querySelectorAll('a'));
+            
+            // 1. Try href matches (comprehensive list)
             const possibleHrefs = [
                 `/${username}/followers/`,
                 `/${username}/followers`,
-                `/${username.toLowerCase()}/followers/`,
-                `/${username.toLowerCase()}/followers`
+                `/${usernameLower}/followers/`,
+                `/${usernameLower}/followers`
             ];
             
-            // 1. Try exact href match
             for (const href of possibleHrefs) {
-                const link = document.querySelector(`a[href="${href}"]`);
-                if (link) {
-                    link.click();
-                    return true;
-                }
+                const link = allLinks.find(a => a.getAttribute('href') === href);
+                if (link) { link.click(); return true; }
             }
             
-            // 2. Try partial href match for followers
-            const partialLink = Array.from(document.querySelectorAll('a')).find(a => 
-                a.getAttribute('href')?.includes('/followers/') && 
-                a.getAttribute('href')?.includes(username)
-            );
+            // 2. Try partial href matches (handling absolute URLs as well)
+            const partialMatch = allLinks.find(a => {
+                const href = a.getAttribute('href') || "";
+                return href.includes('/followers') && href.toLowerCase().includes(usernameLower);
+            });
+            if (partialMatch) { partialMatch.click(); return true; }
             
-            if (partialLink) {
-                partialLink.click();
-                return true;
-            }
+            // 3. Try searching by text content (translated or English)
+            const textMatch = allLinks.find(a => {
+                const text = a.innerText.toLowerCase();
+                // Common words for followers in different languages might be needed, 
+                // but "followers" is standard on IG even in many translations
+                return text.includes('follower') || text.includes('takipçi') || text.includes('подписчик');
+            });
+            if (textMatch) { textMatch.click(); return true; }
             
-            // 3. Fallback to stats list (usually 2nd link in the profile header)
-            const statsLinks = document.querySelectorAll('header a');
-            for (const link of statsLinks) {
-                if (link.innerText.toLowerCase().includes('followers')) {
-                    link.click();
-                    return true;
-                }
+            // 4. Fallback: Find the 2nd link in the profile header section which is usually "Followers"
+            const header = document.querySelector('header');
+            if (header) {
+                const headerLinks = Array.from(header.querySelectorAll('a'));
+                // Stats are usually: Posts, Followers, Following
+                const statsLink = headerLinks.find(a => a.href.includes('/followers'));
+                if (statsLink) { statsLink.click(); return true; }
             }
             
             return false;
