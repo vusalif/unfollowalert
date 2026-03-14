@@ -100,6 +100,20 @@ async function processUser(user, bot) {
                     `📊 @${instagram_username}: ${unfollowers.length} unfollowed, ${newFollowers.length} new`
                 );
 
+                // SAFETY GUARD: If we lost > 10% of followers AND more than 5 in one go, 
+                // it's likely a partial/failed scrape. Don't sync to DB to avoid "fake" unfollower alerts.
+                const previousCount = db.getCurrentFollowers(id).length;
+                const dropCount = unfollowers.length;
+                if (dropCount > 5 && dropCount > previousCount * 0.1) {
+                    log(`🛑 Abnormal follower drop detected (${dropCount}/${previousCount}). Suspecting partial scrape. Skipping sync.`);
+                    await bot.sendMessage(
+                        telegram_id,
+                        `⚠️ <b>Unusual Activity Detected</b>\n\nOur check showed you lost <b>${dropCount}</b> followers at once. Since this is a large drop, we've paused this update to prevent a false report. We'll verify this on the next check.`,
+                        { parse_mode: "HTML" }
+                    );
+                    return;
+                }
+
                 // Only send message if there are changes
                 if (unfollowers.length > 0 || newFollowers.length > 0) {
                     const report = buildReport(unfollowers, newFollowers, freshFollowers.length);

@@ -145,6 +145,18 @@ async function extractFollowerUsernames(page, scrollableHandle) {
                         !rowText.includes("Follow Back")) {
                         continue;
                     }
+
+                    // Strict "Suggested for you" check
+                    const dialogText = container.innerText;
+                    const suggestionIndex = dialogText.indexOf("Suggested for you");
+                    if (suggestionIndex !== -1) {
+                        const linkText = link.innerText.trim();
+                        // If the link text appears only after the suggestion header, it's a suggestion
+                        if (linkText && dialogText.lastIndexOf(linkText) >= suggestionIndex) {
+                            continue; 
+                        }
+                    }
+
                     usernames.add(username);
                 }
             }
@@ -206,22 +218,78 @@ async function scrapeFollowers(instagramUsername) {
         await page.goto(profileUrl, { waitUntil: "networkidle2", timeout: 60000 });
         await sleep(randomDelay(3000, 5000));
 
-        // Check if logged in
-        const isLoggedIn = await page.evaluate(() => {
-            return !document.querySelector('input[name="username"]');
+        // Check if logged in and not on a challenge page
+        const sessionStatus = await page.evaluate(() => {
+            const isLoginPage = !!document.querySelector('input[name="username"]');
+            const isChallenge = document.body.innerText.includes("Help us confirm you own this account") || 
+                                document.body.innerText.includes("Suspicious Login Attempt");
+            const isCheckpoint = window.location.href.includes("checkpoint");
+            
+            if (isLoginPage) return "expired";
+            if (isChallenge || isCheckpoint) return "challenge";
+            return "active";
         });
-
-        if (!isLoggedIn) {
+        
+        if (sessionStatus === "expired") {
             throw new Error("Instagram session expired. Please update cookies.json.");
+        } else if (sessionStatus === "challenge") {
+            throw new Error("Instagram session blocked by a security challenge (checkpoint). Please log in manually in a browser and update cookies.json.");
         }
 
         log("✅ Session is active");
 
-        // Click followers link
-        const followersLinkSelector = `a[href="/${instagramUsername}/followers/"]`;
-        await page.waitForSelector(followersLinkSelector, { timeout: 15000 });
-        await sleep(randomDelay(1000, 2000));
-        await page.click(followersLinkSelector);
+        // Wait for profile stats to load (Followers/Following links)
+        try {
+            await page.waitForSelector('header a[href*="/followers"]', { timeout: 10000 });
+        } catch (_) {
+            log("⚠️ Profile stats slow to load. Proceeding with robust clicker.");
+        }
+
+        // Click followers link - using a more robust approach
+        log(`🔍 Looking for followers link for @${instagramUsername}…`);
+        const followersClicked = await page.evaluate((username) => {
+            const possibleHrefs = [
+                `/${username}/followers/`,
+                `/${username}/followers`,
+                `/${username.toLowerCase()}/followers/`,
+                `/${username.toLowerCase()}/followers`
+            ];
+            
+            // 1. Try exact href match
+            for (const href of possibleHrefs) {
+                const link = document.querySelector(`a[href="${href}"]`);
+                if (link) {
+                    link.click();
+                    return true;
+                }
+            }
+            
+            // 2. Try partial href match for followers
+            const partialLink = Array.from(document.querySelectorAll('a')).find(a => 
+                a.getAttribute('href')?.includes('/followers/') && 
+                a.getAttribute('href')?.includes(username)
+            );
+            
+            if (partialLink) {
+                partialLink.click();
+                return true;
+            }
+            
+            // 3. Fallback to stats list (usually 2nd link in the profile header)
+            const statsLinks = document.querySelectorAll('header a');
+            for (const link of statsLinks) {
+                if (link.innerText.toLowerCase().includes('followers')) {
+                    link.click();
+                    return true;
+                }
+            }
+            
+            return false;
+        }, instagramUsername);
+
+        if (!followersClicked) {
+            throw new Error(`Could not find followers link for @${instagramUsername}. Is the account private or did the UI change?`);
+        }
         log("✅ Clicked the Followers link");
 
         // Wait for dialog and at least one follower item
