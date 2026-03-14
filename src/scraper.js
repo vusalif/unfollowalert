@@ -146,9 +146,22 @@ async function extractFollowerUsernames(page, scrollableHandle) {
                         continue;
                     }
 
-                    // Strict "Suggested for you" check
+                    // Strict "Suggested for you" check (Multi-language support)
                     const dialogText = container.innerText;
-                    const suggestionIndex = dialogText.indexOf("Suggested for you");
+                    const suggestionHeaders = [
+                        "Suggested for you",
+                        "Senin İçin Önerilenler", // Turkish
+                        "Senin için önerilenler",
+                        "Рекомендации для вас",     // Russian
+                        "Haqqında təkliflər",      // Azerbaijani (uncommon but possible)
+                        "Suggestions for you"
+                    ];
+                    
+                    const suggestionIndex = suggestionHeaders.reduce((found, header) => {
+                        if (found !== -1) return found;
+                        return dialogText.indexOf(header);
+                    }, -1);
+
                     if (suggestionIndex !== -1) {
                         const linkText = link.innerText.trim();
                         // If the link text appears only after the suggestion header, it's a suggestion
