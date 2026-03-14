@@ -212,8 +212,9 @@ async function scrapeFollowers(instagramUsername) {
 
     let followers = [];
 
+    let page;
     try {
-        const page = await browser.newPage();
+        page = await browser.newPage();
         page.setDefaultTimeout(120_000);           // 2 min for selectors / evaluate
         page.setDefaultNavigationTimeout(120_000); // 2 min for goto / navigation
 
@@ -228,25 +229,40 @@ async function scrapeFollowers(instagramUsername) {
 
         const profileUrl = `https://www.instagram.com/${instagramUsername}/`;
         log(`🌐 Navigating to ${profileUrl}`);
-        await page.goto(profileUrl, { waitUntil: "networkidle2", timeout: 60000 });
+        
+        // Use a more patient navigation
+        await page.goto(profileUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+        await sleep(2000);
+        await page.goto(profileUrl, { waitUntil: "networkidle2", timeout: 30000 }).catch(() => log("⚠️ Networkidle2 timeout, proceeding..."));
+        
         await sleep(randomDelay(3000, 5000));
 
-        // Check if logged in and not on a challenge page
-        const sessionStatus = await page.evaluate(() => {
+        // Check page state and session
+        const pageState = await page.evaluate(() => {
+            const body = document.body.innerText;
             const isLoginPage = !!document.querySelector('input[name="username"]');
-            const isChallenge = document.body.innerText.includes("Help us confirm you own this account") || 
-                                document.body.innerText.includes("Suspicious Login Attempt");
+            const isChallenge = body.includes("Help us confirm you own this account") || 
+                                body.includes("Suspicious Login Attempt") ||
+                                body.includes("confirm it's you");
             const isCheckpoint = window.location.href.includes("checkpoint");
+            const isPrivate = body.includes("This account is private") || body.includes("Gizli Hesap");
+            const isNotFound = body.includes("isn't available") || body.includes("Sayfa Bulunamadı") || body.includes("Page Not Found");
             
             if (isLoginPage) return "expired";
             if (isChallenge || isCheckpoint) return "challenge";
+            if (isNotFound) return "not_found";
+            if (isPrivate) return "private";
             return "active";
         });
         
-        if (sessionStatus === "expired") {
+        if (pageState === "expired") {
             throw new Error("Instagram session expired. Please update cookies.json.");
-        } else if (sessionStatus === "challenge") {
-            throw new Error("Instagram session blocked by a security challenge (checkpoint). Please log in manually in a browser and update cookies.json.");
+        } else if (pageState === "challenge") {
+            throw new Error("Instagram session blocked by a security challenge. Please log in manually in a browser and update cookies.json.");
+        } else if (pageState === "not_found") {
+            throw new Error(`Instagram profile @${instagramUsername} not found or is disabled.`);
+        } else if (pageState === "private") {
+            throw new Error(`@${instagramUsername} is a private account. You must be following them with the account used in cookies.json to track them.`);
         }
 
         log("✅ Session is active");
@@ -365,7 +381,18 @@ async function scrapeFollowers(instagramUsername) {
 
         log(`✅ Scraped ${followers.length} followers for @${instagramUsername}`);
     } catch (err) {
-        console.error(`❌ Scraping error for @${instagramUsername}:`, err.message);
+        log(`❌ Scraping error for @${instagramUsername}: ${err.message}`);
+        
+        if (page) {
+            try {
+                const debugPath = path.join(__dirname, "..", "public", "debug.png");
+                await page.screenshot({ path: debugPath });
+                log(`📸 Debug screenshot saved to ${debugPath} - check it at http://YOUR_SERVER_IP:${process.env.PORT || 3000}/debug.png`);
+            } catch (screenshotErr) {
+                log(`⚠️ Could not save debug screenshot: ${screenshotErr.message}`);
+            }
+        }
+        
         throw err;
     } finally {
         await browser.close();
